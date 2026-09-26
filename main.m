@@ -405,7 +405,6 @@ static BOOL TryCachedDeb(DPPkg *p, NSString *prefix, NSString *debDir, NSString 
 }
 
 static BOOL Materialize(DPPkg *p, NSString *root, NSString *prefix, NSUInteger *done) {
-    NSFileManager *fm = [NSFileManager defaultManager];
     static NSSet<NSString *> *skipDirs = nil;
     if (!skipDirs) {
         skipDirs = [NSSet setWithObjects:@"/.", @"/", @"/usr", @"/var", @"/etc", @"/bin",
