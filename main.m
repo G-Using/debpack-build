@@ -25,6 +25,7 @@
 extern char **environ;
 
 static NSString *gAdminDir = nil;
+static BOOL gJson = NO;
 
 /* ---------------- 前向声明 ---------------- */
 static void Print(NSString *fmt, ...);
@@ -582,13 +583,47 @@ static void PrintUsage(void) {
     Print(@"默认输出: /var/mobile/Documents/DebBackup/<时间戳>/");
 }
 
-static void DoList(NSArray<DPPkg *> *pkgs, NSString *prefix) {
+static NSArray<DPPkg *> *SortedPackages(NSArray<DPPkg *> *pkgs) {
     NSMutableArray<DPPkg *> *sorted = [pkgs mutableCopy];
     [sorted sortUsingComparator:^NSComparisonResult(DPPkg *a, DPPkg *b) {
         NSComparisonResult r = [a.displayName compare:b.displayName options:NSCaseInsensitiveSearch];
         if (r != NSOrderedSame) return r;
         return [a.pkgId compare:b.pkgId];
     }];
+    return sorted;
+}
+
+static void DoList(NSArray<DPPkg *> *pkgs, NSString *prefix, BOOL json) {
+    NSArray<DPPkg *> *sorted = SortedPackages(pkgs);
+    NSString *prefsRoot = PrefsRoot();
+
+    if (json) {
+        NSMutableArray<NSDictionary *> *arr = [NSMutableArray array];
+        for (DPPkg *p in sorted) {
+            p.prefsDomains = DomainsForPackage(p, prefix);
+            BOOL hasPrefs = NO;
+            for (NSString *d in p.prefsDomains) {
+                if (FileExistsAt([NSString stringWithFormat:@"%@/%@.plist", prefsRoot, d])) {
+                    hasPrefs = YES;
+                    break;
+                }
+            }
+            [arr addObject:@{
+                @"id": p.pkgId,
+                @"name": p.displayName,
+                @"version": p.version,
+                @"section": p.section,
+                @"size": @(p.installedSize),
+                @"hasPrefs": @(hasPrefs),
+                @"risky": @(IsRisky(p)),
+            }];
+        }
+        NSData *d = [NSJSONSerialization dataWithJSONObject:arr options:0 error:nil];
+        if (d) fwrite([d bytes], 1, [d length], stdout);
+        fputs("\n", stdout);
+        return;
+    }
+
     Print(@"共 %lu 个已安装包", (unsigned long)sorted.count);
     Print(@"名字\t标识\t版本\t配置");
     Print(@"----\t----\t----\t----");
@@ -596,7 +631,6 @@ static void DoList(NSArray<DPPkg *> *pkgs, NSString *prefix) {
     for (DPPkg *p in sorted) {
         idx++;
         p.prefsDomains = DomainsForPackage(p, prefix);
-        NSString *prefsRoot = PrefsRoot();
         BOOL hasPrefs = NO;
         for (NSString *d in p.prefsDomains) {
             if (FileExistsAt([NSString stringWithFormat:@"%@/%@.plist", prefsRoot, d])) {
@@ -780,11 +814,18 @@ int main(int argc, char **argv) {
             p.files = FileListFor(adminDir, p.pkgId);
         }
 
-        Print(@"[信息] dpkg 数据库: %@", adminDir);
-        Print(@"[信息] 越狱前缀: %@", prefix.length ? prefix : @"(rootful)");
+        if (!gJson) {
+            Print(@"[信息] dpkg 数据库: %@", adminDir);
+            Print(@"[信息] 越狱前缀: %@", prefix.length ? prefix : @"(rootful)");
+        }
 
         if ([cmd isEqualToString:@"list"]) {
-            DoList(pkgs, prefix);
+            BOOL json = NO;
+            for (int i = 2; i < argc; i++) {
+                if ([[NSString stringWithUTF8String:argv[i]] isEqualToString:@"--json"]) json = YES;
+            }
+            gJson = json;
+            DoList(pkgs, prefix, json);
             return 0;
         }
 
@@ -799,7 +840,22 @@ int main(int argc, char **argv) {
                 else if ([a isEqualToString:@"--no-prefs"]) noPrefs = YES;
                 else if ([a isEqualToString:@"--out"]) {
                     if (i + 1 < argc) outDir = [NSString stringWithUTF8String:argv[++i]];
-                } else if ([a hasPrefix:@"-"]) {
+                }
+                else if ([a isEqualToString:@"--ids-file"]) {
+                    if (i + 1 < argc) {
+                        NSString *f = [NSString stringWithUTF8String:argv[++i]];
+                        NSString *body = [NSString stringWithContentsOfFile:f
+                                                                  encoding:NSUTF8StringEncoding
+                                                                     error:nil];
+                        if (body) {
+                            for (NSString *line in [body componentsSeparatedByString:@"\n"]) {
+                                NSString *t = Trim(line);
+                                if (t.length > 0) [ids addObject:t];
+                            }
+                        }
+                    }
+                }
+                else if ([a hasPrefix:@"-"]) {
                     /* 忽略未知开关 */
                 } else {
                     [ids addObject:a];
