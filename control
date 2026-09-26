@@ -1,0 +1,9 @@
+Package: com.debpack.cli
+Name: DebPack
+Version: 0.1.0
+Architecture: iphoneos-arm
+Description: 一键导出已安装的 deb 与插件配置 plist 到手机文件
+Maintainer: debpack
+Author: debpack
+Section: Utilities
+Depends: dpkg
